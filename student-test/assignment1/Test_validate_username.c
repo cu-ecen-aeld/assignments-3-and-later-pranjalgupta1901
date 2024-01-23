@@ -21,5 +21,5 @@ void test_validate_my_username()
        */
        	const char *string_1 = my_username();
 	const char *string_2 = malloc_username_from_conf_file();
-	TEST_ASSERT_EQUAL_STRING_MESSAGE(string_1, string_2, "strings are not equal");
+	TEST_ASSERT_EQUAL_STRING_MESSAGE(string_1, string_2, "GitHub Usernames are not equal");
 }
