@@ -12,6 +12,7 @@ if [ ! -n "$2" ]; then
 	exit 1
 fi
 
+
 #making the directory by extracting the directory from the complete pathname which include the file name also
 mkdir -p "$(dirname "$1")"
 
