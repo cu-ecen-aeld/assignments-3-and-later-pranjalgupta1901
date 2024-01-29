@@ -20,8 +20,13 @@ int main(int argc, char *argv[]){
 	const char *filename = argv[1];
 	const char *string = argv[2];
 
-	if(string == NULL)
+	if(string == NULL){
+
+		openlog("FileDescriptor", LOG_CONS | LOG_PID , LOG_USER);
+		syslog(LOG_PERROR, "string not found");
+		closelog();
 		return 1;
+	}
 
 	int fd;
 	fd = open (filename, O_RDWR|O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
