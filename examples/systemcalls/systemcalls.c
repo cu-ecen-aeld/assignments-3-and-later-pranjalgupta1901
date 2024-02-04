@@ -22,8 +22,10 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 	int result = system(cmd);
-	if(result == -1)
+	if(result == -1){
+		printf("Error during system function execution\n");
 		return false;
+	}
 
 
     return true;
@@ -70,12 +72,14 @@ bool do_exec(int count, ...)
 */  int status;
     pid_t pid = fork();
     if(pid == -1){
+	printf("Error during creation of child process\n");
 	return false;
     }
     else if(pid == 0){
 	    //child process
 
     	execv(command[0], command);
+	printf("execv command failed");
 	exit(EXIT_FAILURE);
 	return false;
     }
@@ -85,6 +89,7 @@ bool do_exec(int count, ...)
 	return false;
     if(WIFEXITED (status) == 0 || WEXITSTATUS(status) == 0){
 	    va_end(args);
+	    printf("child process successfully terminated\n");
 	    return true;
    	 }
     }
@@ -123,12 +128,15 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
 */
 
     int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
-    if(fd < 0)
+    if(fd < 0){
+	    printf("Error in opening of file\n");
 	exit(-1);
+    }
    
     int status;
     pid_t pid = fork();
     if(pid == -1){
+	    printf("Error in creation of child process");
 	return false;
     }
     else if(pid == 0){
@@ -137,6 +145,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
 		abort();
 	close(fd);
     	execv(command[0], command);
+	printf("Execv command failed\n");
 	exit(EXIT_FAILURE);
 	return false;
     }
@@ -148,6 +157,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     }
     if(WIFEXITED (status) == 0 || WEXITSTATUS(status) == 0){
 	    va_end(args);
+	    printf("Child process terminated successfully");
 	    return true;
    	 }
     }
