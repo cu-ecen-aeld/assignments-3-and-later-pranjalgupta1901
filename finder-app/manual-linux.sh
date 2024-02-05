@@ -91,10 +91,12 @@ cp ld-linux-aarch64.so.1 "${OUTDIR}/rootfs/lib"
 cd /home/prgu8117/aesd/cross_compilers/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu/libc/lib64
 cp libm.so.6 libresolv.so.2 libc.so.6 "${OUTDIR}/rootfs/lib"
 
-
+cd "{OUTDIR}/rootfs"
 # TODO: Make device nodes
 sudo mknod -m 666 dev/null c 1 3
 sudo mknod -m 666 dev/console c 5 1
+
+cd $FINDER_APP_DIR
 
 # TODO: Clean and build the writer utility
 make clean
@@ -105,8 +107,10 @@ mv writer "${OUTDIR}/rootfs/home"
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
 cd "$FINDER_APP_DIR"
-cp finder.sh conf/username.txt conf/assignment.txt finder-test.sh "${OUTDIR}/rootfs/home"
-cp autorun-qemu.sh "${OUTDIR}/rootfs/home"
+cd ..
+cp finder-app/ "${OUTDIR/rootfs/home"
+#cp finder.sh conf/username.txt conf/assignment.txt finder-test.sh "${OUTDIR}/rootfs/home"
+#cp autorun-qemu.sh "${OUTDIR}/rootfs/home"
 
 # TODO: Chown the root directory
 cd rootfs/
@@ -115,4 +119,5 @@ sudo chown -R root:root *
 # TODO: Create initramfs.cpio.gz
 cd "$OUTDIR/rootfs"
 find . | cpio -H newc -ov --owner root:root > ${OUTDIR}/initramfs.cpio
+cd "$OUTDIR"
 gzip -f initramfs.cpio 
