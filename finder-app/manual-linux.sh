@@ -29,6 +29,7 @@ if [ ! -d "${OUTDIR}/linux-stable" ]; then
 	echo "CLONING GIT LINUX STABLE VERSION ${KERNEL_VERSION} IN ${OUTDIR}"
 	git clone ${KERNEL_REPO} --depth 1 --single-branch --branch ${KERNEL_VERSION}
 fi
+echo "Entering into kernel build"
 if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     cd linux-stable
     echo "Checking out version ${KERNEL_VERSION}"
@@ -40,10 +41,11 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     make -j8 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} defconfig
     make -j8 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} all
     make -j8 ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} dtbs
+    echo "done with building of kernel"
 fi
 
 echo "Adding the Image in outdir"
-cp "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" "${OUTDIR}/"
+cp "${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image" "${OUTDIR}"
 
 echo "Creating the staging directory for the root filesystem"
 cd "$OUTDIR"
@@ -69,14 +71,13 @@ git clone git://busybox.net/busybox.git
     cd busybox
     git checkout ${BUSYBOX_VERSION}
     # TODO:  Configure busybox
+    make distclean
     make defconfig
 else
     cd busybox
 fi
 
 # TODO: Make and install busybox
-make distclean
-make defconfig
 make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
 make CONFIG_PREFIX=${OUTDIR}/rootfs ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
 cd "${OUTDIR}/rootfs"
@@ -101,7 +102,7 @@ cd "${FINDER_APP_DIR}"
 
 # TODO: Clean and build the writer utility
 make clean
-make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
+make CROSS_COMPILE=${CROSS_COMPILE}
 cd "${FINDER_APP_DIR}"
 cp "${FINDER_APP_DIR}/writer" "${OUTDIR}/rootfs/home"
 
