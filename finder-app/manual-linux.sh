@@ -110,7 +110,10 @@ mv writer "${OUTDIR}/rootfs/home"
 cd "${FINDER_APP_DIR}"
 cd ..
 cp finder-app/ "${OUTDIR}/rootfs/home"
-cp finder-app/conf/assignment.txt "${OUTDIR}/rootfs/home/conf"
+cp finder-app/conf/assignment.txt "${OUTDIR}/rootfs/home"
+
+cp finder-app/conf/username.txt "${OUTDIR}/rootfs/home"
+
 
 # TODO: Chown the root directory
 cd "${OUTDIR}/rootfs"
