@@ -79,7 +79,7 @@ make distclean
 make defconfig
 make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
 make CONFIG_PREFIX=${OUTDIR}/rootfs ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE} install
-cd "$OUTDIR/rootfs"
+cd "${OUTDIR}/rootfs"
 
 echo "Library dependencies"
 ${CROSS_COMPILE}readelf -a bin/busybox | grep "program interpreter"
@@ -97,21 +97,21 @@ cd "${OUTDIR}/rootfs"
 sudo mknod -m 666 dev/null c 1 3
 sudo mknod -m 666 dev/console c 5 1
 
-cd "${FINDER_APP_DIR}
+cd "${FINDER_APP_DIR}"
 
 # TODO: Clean and build the writer utility
 make clean
 make ARCH=${ARCH} CROSS_COMPILE=${CROSS_COMPILE}
 cd "${FINDER_APP_DIR}"
-mv writer "${OUTDIR}/rootfs/home"
+cp "${FINDER_APP_DIR}/writer" "${OUTDIR}/rootfs/home"
 
 # TODO: Copy the finder related scripts and executables to the /home directory
 # on the target rootfs
-cd "${FINDER_APP_DIR}"
-cd ..
-cp finder-app/ "${OUTDIR}/rootfs/home"
-cp finder-app/conf/assignment.txt "${OUTDIR}/rootfs/home/conf"
-cp finder-app/conf/username.txt "${OUTDIR}/rootfs/home/conf"
+cp "${FINDER_APP_DIR}/finder.sh" "${OUTDIR}/rootfs/home"
+cp "${FINDER_APP_DIR}/conf/assignment.txt" "${OUTDIR}/rootfs/home/conf"
+cp "${FINDER_APP_DIR}/conf/username.txt" "${OUTDIR}/rootfs/home/conf"
+cp "${FINDER_APP_DIR}/finder-test.sh" "${OUTDIR}/rootfs/home"
+cp "${FINDER_APP_DIR}/autorun-qemu.sh" "${OUTDIR}/rootfs/home"
 
 
 # TODO: Chown the root directory
