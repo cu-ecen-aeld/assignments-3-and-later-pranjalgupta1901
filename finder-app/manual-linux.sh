@@ -58,7 +58,7 @@ mkdir -p "${OUTDIR}/rootfs"
 cd "${OUTDIR}/rootfs"
 
 mkdir -p bin dev etc home lib lib64 proc sbin sys tmp usr var
-mkdir -p usr/bin usr/lib usr/sbin
+mkdir -p usr/bin usr/lib usr/sbin home/conf
 mkdir -p var/log
 
 
@@ -88,7 +88,7 @@ ${CROSS_COMPILE}readelf -a bin/busybox | grep "Shared library"
 # TODO: Add library dependencies to rootfs
 SYSROOT_VALUE=$(aarch64-none-linux-gnu-gcc --print-sysroot)
 cp ${SYSROOT_VALUE}/lib/ld-linux-aarch64.so.1 "${OUTDIR}/rootfs/lib"
-cp ${SYSROOT_VALUE}/lib64/libm.so.6"${OUTDIR}/rootfs/lib64" 
+cp ${SYSROOT_VALUE}/lib64/libm.so.6 "${OUTDIR}/rootfs/lib64" 
 cp ${SYSROOT_VALUE}/lib64/libresolv.so.2 "${OUTDIR}/rootfs/lib64"
 cp ${SYSROOT_VALUE}/lib64/libc.so.6 "${OUTDIR}/rootfs/lib64"
 
@@ -110,9 +110,8 @@ mv writer "${OUTDIR}/rootfs/home"
 cd "${FINDER_APP_DIR}"
 cd ..
 cp finder-app/ "${OUTDIR}/rootfs/home"
-cp finder-app/conf/assignment.txt "${OUTDIR}/rootfs/home"
-
-cp finder-app/conf/username.txt "${OUTDIR}/rootfs/home"
+cp finder-app/conf/assignment.txt "${OUTDIR}/rootfs/home/conf"
+cp finder-app/conf/username.txt "${OUTDIR}/rootfs/home/conf"
 
 
 # TODO: Chown the root directory
