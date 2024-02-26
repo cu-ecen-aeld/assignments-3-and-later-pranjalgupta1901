@@ -1,12 +1,10 @@
 # DEFAULT TARGET
-CROSS_COMPILE?=
-
 TARGET := aesdsocket
 all: $(TARGET)
 
 # BUILDING THE WRITER FILE
 $(TARGET): aesdsocket.c
-	${CROSS_COMPILE}$(CC) $< -o $@ 
+	$(CC) $< -o $@ 
 	chmod +x $@
 #	mv $@.o $@
 	
