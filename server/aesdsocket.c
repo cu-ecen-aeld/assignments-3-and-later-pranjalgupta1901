@@ -29,11 +29,11 @@ void mysig(int signo)
 
 		if (ret == 0)
 		{
-			syslog(LOG_DEBUG, "Deleted file %s\r\n", filename);
+			syslog(LOG_DEBUG, "Deleted file %s\n", filename);
 		}
 		else
 		{
-			syslog(LOG_PERROR, "Unable to Delete file %s with error code %d\r\n", filename, errno);
+			syslog(LOG_PERROR, "Unable to Delete file %s with error code %d  \n", filename, errno);
 		}
 		closelog();
 		exit(EXIT_SUCCESS);
@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
 	errorcode = getaddrinfo(NULL, port, &hints, &result);
 	if (errorcode != 0)
 	{
-		syslog(LOG_PERROR, "Error in gettng address suing getaddrinfo with error code %d\r\n", errno);
+		syslog(LOG_PERROR, "Error in gettng address suing getaddrinfo with error code %d\n", errno);
 		closelog();
 		exit(-1);
 	}
@@ -95,24 +95,24 @@ int main(int argc, char *argv[])
 	socket_fd = socket(result->ai_family, result->ai_socktype, 0);
 	if (socket_fd == -1)
 	{
-		syslog(LOG_PERROR, "socket creation failed with error code %d\r\n", errno);
+		syslog(LOG_PERROR, "socket creation failed with error code %d\n", errno);
 		closelog();
 		exit(-1);
 	}
-	syslog(LOG_DEBUG, "Socket Created with Socket Id %d\r\n", socket_fd);
+	syslog(LOG_DEBUG, "Socket Created with Socket Id %d\n", socket_fd);
 
 	int var_setsockopt = 1;
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &var_setsockopt,
 				   sizeof(int)) == -1)
 	{
-		syslog(LOG_PERROR, "Socket resuse address failed with error code %d\r\n", errno);
+		syslog(LOG_PERROR, "Socket resuse address failed with error code %d\n", errno);
 		closelog();
 		exit(-1);
 	}
 
 	if (argc > 1 && strcmp(argv[1], "-d") == 0)
 	{
-		syslog(LOG_DEBUG, "Daemonizing process\r\n");
+		syslog(LOG_USER, "Daemonizing process\n");
 		daemonize();
 	}
 
@@ -120,19 +120,19 @@ int main(int argc, char *argv[])
 	if (errorcode == -1)
 	{
 		close(socket_fd);
-		syslog(LOG_PERROR, "Socket bind failed with error code %d and closing server socket \r\n", errno);
+		syslog(LOG_PERROR, "Socket bind failed with error code %d and closing server socket \n", errno);
 		closelog();
 		exit(-1);
 	}
 
-	syslog(LOG_DEBUG, "Bind Successful\r\n");
+	syslog(LOG_DEBUG, "Bind Successful\n");
 	freeaddrinfo(result);
 
 	errorcode = listen(socket_fd, 10);
 	if (errorcode == -1)
 	{
 		close(socket_fd);
-		syslog(LOG_PERROR, "Listen failed with error code %d and closing server socket \r\n", errno);
+		syslog(LOG_PERROR, "Listen failed with error code %d and closing server socket \n", errno);
 		closelog();
 		exit(-1);
 	}
@@ -146,7 +146,7 @@ int main(int argc, char *argv[])
 		if (client_fd == -1)
 		{
 			close(socket_fd);
-			syslog(LOG_PERROR, "connection failed with error code %d and closing server socket \r\n", errno);
+			syslog(LOG_PERROR, "connection failed with error code %d and closing server socket \n", errno);
 			closelog();
 		}
 
@@ -156,21 +156,21 @@ int main(int argc, char *argv[])
 
 			inet_ntop(AF_INET, &ip_addr_ptr->sin_addr, ip_addr, INET_ADDRSTRLEN);
 
-			syslog(LOG_DEBUG, "Accepted connection from %s\r\n", ip_addr);
+			syslog(LOG_DEBUG, "Accepted connection from %s\n", ip_addr);
 
 			int fd;
 			fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
 
 			if (fd == -1)
 			{
-				syslog(LOG_DEBUG, "Closed connection from %s\r\n", ip_addr);
+				syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 				close(client_fd);
 				syslog(LOG_PERROR, "Error in opening of the file %s and with error code %d\n", filename, errno);
 			}
 			else
 			{
 
-				syslog(LOG_DEBUG, "Recieve Started\r\n");
+				syslog(LOG_DEBUG, "Recieve Started\n");
 
 				int bytes_rec;
 				bool rec_complete = false;
@@ -181,7 +181,7 @@ int main(int argc, char *argv[])
 					bytes_rec = recv(client_fd, file_array, FILE_SIZE, 0);
 					if (bytes_rec < 0)
 					{
-						syslog(LOG_DEBUG, "Closed connection from %s\r\n", ip_addr);
+						syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 						close(client_fd);
 						syslog(LOG_PERROR, "recieve unsuccessful with error code %d\n", errno);
 						closelog();
@@ -192,7 +192,7 @@ int main(int argc, char *argv[])
 
 						if (result == -1)
 						{
-							syslog(LOG_DEBUG, "Closed connection from %s\r\n", ip_addr);
+							syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 							close(client_fd);
 							syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
 							closelog();
@@ -212,14 +212,14 @@ int main(int argc, char *argv[])
 				int file_offset = lseek(fd, 0, SEEK_SET);
 				if (file_offset == -1)
 				{
-					syslog(LOG_DEBUG, "Closed connection from %s\r\n", ip_addr);
+					syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 					syslog(LOG_PERROR, "Unable to reset the file pointer of file %s with error code %d\n", filename, errno);
 					close(client_fd);
 				}
 				else
 				{
 
-					syslog(LOG_DEBUG, "Sending Started\r\n");
+					syslog(LOG_DEBUG, "Sending Started\n");
 					int bytes_send;
 					int sent_actual;
 					bool send_complete = false;
@@ -252,7 +252,7 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-	syslog(LOG_DEBUG, "Process Completed\r\n");
+	syslog(LOG_DEBUG, "Process Completed\n");
 	return 0;
 }
 
