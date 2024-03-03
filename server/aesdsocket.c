@@ -15,9 +15,9 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <time.h>
-#include <sys/queue.h>
+#include "queue.h"
 
-#define FILE_SIZE 1024
+#define FILE_SIZE 8192
 #define MAX_CONNECTIONS 30
 
 int socket_fd, client_fd;
@@ -31,12 +31,14 @@ char ip_addr[INET6_ADDRSTRLEN];
 time_t t;
 struct tm *tmp;
 char MY_TIME[50];
+int fd;
 
 struct thread_data_t
 {
 	int client_fd;
 	pthread_t thread_id;
 	bool is_socket_complete;
+	// int file_fd;
 	SLIST_ENTRY(thread_data_t)
 	entries;
 };
@@ -56,7 +58,6 @@ void *handle_client(void *arg)
 {
 
 	struct thread_data_t *data = (struct thread_data_t *)arg;
-	int fd;
 
 	syslog(LOG_DEBUG, "Recieve Started\n");
 
@@ -66,50 +67,61 @@ void *handle_client(void *arg)
 	while (rec_complete == false)
 	{
 
-		bytes_rec = recv(data->client_fd, file_array, FILE_SIZE, 0);
-		if (bytes_rec < 0)
+		fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
+
+		if (fd == -1)
 		{
 			syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 			close(data->client_fd);
-			syslog(LOG_PERROR, "recieve unsuccessful with error code %d\n", errno);
-			closelog();
+			syslog(LOG_PERROR, "Error in opening of the file %s and with error code %d\n", filename, errno);
+			data->is_socket_complete = false;
 		}
 		else
 		{
-			fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
 
-			if (fd == -1)
+			bytes_rec = recv(data->client_fd, file_array, FILE_SIZE, 0);
+			if (bytes_rec < 0)
 			{
 				syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 				close(data->client_fd);
-				// pthread_mutex_unlock(&aesdsocket_mutex);
-				syslog(LOG_PERROR, "Error in opening of the file %s and with error code %d\n", filename, errno);
-				return NULL;
-			}
-
-			ptr = memchr(file_array, '\n', bytes_rec);
-			if (ptr != NULL)
-			{
-				rec_complete = true;
-			}
-			if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
-			{
-				syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
-				close(data->client_fd);
-				syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
+				syslog(LOG_PERROR, "recieve unsuccessful with error code %d\n", errno);
 				closelog();
+				close(fd);
+				data->is_socket_complete = false;
 			}
-			ssize_t result = write(fd, file_array, bytes_rec);
-
-			if (result == -1)
+			else
 			{
-				syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
-				close(data->client_fd);
-				// close(fd);
-				syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
-				closelog();
+
+				ptr = memchr(file_array, '\n', bytes_rec);
+				if (ptr != NULL)
+				{
+					rec_complete = true;
+				}
+				if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
+				{
+					syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
+					close(data->client_fd);
+					close(fd);
+					syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
+					closelog();
+					data->is_socket_complete = false;
+				}
+				else
+				{
+					ssize_t result = write(fd, file_array, bytes_rec);
+
+					if (result == -1)
+					{
+						syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
+						close(data->client_fd);
+						close(fd);
+						syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
+						data->is_socket_complete = false;
+						closelog();
+					}
+					pthread_mutex_unlock(&aesdsocket_mutex);
+				}
 			}
-			pthread_mutex_unlock(&aesdsocket_mutex);
 		}
 	}
 
@@ -119,6 +131,8 @@ void *handle_client(void *arg)
 		syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 		syslog(LOG_PERROR, "Unable to reset the file pointer of file %s with error code %d\n", filename, errno);
 		close(data->client_fd);
+		close(fd);
+		data->is_socket_complete = false;
 	}
 	else
 	{
@@ -135,12 +149,17 @@ void *handle_client(void *arg)
 			{
 				close(data->client_fd);
 				perror("error in sending data to socket\n");
+				close(fd);
+				printf("socket\n");
+				data->is_socket_complete = false;
 			}
 			else if (bytes_send == 0)
 			{
 				close(data->client_fd);
 				send_complete = true;
 				rec_complete = false;
+				data->is_socket_complete = true;
+				close(fd);
 			}
 			else
 			{
@@ -148,14 +167,15 @@ void *handle_client(void *arg)
 				if (sent_actual != bytes_send)
 				{
 					close(data->client_fd);
+					close(fd);
+					data->is_socket_complete = false;
+					printf("file\n");
 					perror("error in sending data to socket");
 				}
 			}
 		}
 	}
 	// close(fd);
-	data->is_socket_complete = true;
-	// return arg;
 }
 
 void setup_signal()
@@ -187,8 +207,7 @@ void timer_handler(int signum)
 	// using strftime to convert time structure to string
 	strftime(MY_TIME, sizeof(MY_TIME), "timestamp: %Y %M %d %H:%M:%S\n", tmp);
 
-
-	int fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
+	fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
 
 	if (fd == -1)
 	{
@@ -199,10 +218,11 @@ void timer_handler(int signum)
 
 	// Convert time string to bytes for writing to file
 	size_t time_length = strlen(MY_TIME);
-		// Locking mutex to ensure thread safety
+	// Locking mutex to ensure thread safety
 	if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
 	{
 		syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
+		close(fd);
 		return;
 	}
 	ssize_t result = write(fd, MY_TIME, time_length);
@@ -211,9 +231,8 @@ void timer_handler(int signum)
 	{
 		syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
 	}
-pthread_mutex_unlock(&aesdsocket_mutex);
-	// close(fd);
-	// Unlock mutex
+	pthread_mutex_unlock(&aesdsocket_mutex);
+	close(fd);
 }
 
 int main(int argc, char *argv[])
@@ -227,7 +246,7 @@ int main(int argc, char *argv[])
 	const char *port = "9000";
 	char file_array[FILE_SIZE];
 
-	openlog("aesdsocket_assign_6", LOG_CONS | LOG_PID, LOG_USER);
+	openlog(NULL, LOG_CONS | LOG_PID, LOG_USER);
 
 	memset(&hints, 0, sizeof(hints));
 
@@ -237,7 +256,8 @@ int main(int argc, char *argv[])
 	}
 
 	setup_signal();
-	SLIST_HEAD(thread_data_head, thread_data_t) 	thread_data_head;
+	SLIST_HEAD(thread_data_head, thread_data_t)
+	thread_data_head;
 	SLIST_INIT(&thread_data_head);
 
 	hints.ai_family = PF_INET;
@@ -259,6 +279,7 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 	syslog(LOG_DEBUG, "Socket Created with Socket Id %d\n", socket_fd);
+
 
 	int var_setsockopt = 1;
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &var_setsockopt,
@@ -363,6 +384,7 @@ int main(int argc, char *argv[])
 			{
 
 				pthread_t thread;
+				thread_data->client_fd = client_fd;
 				if (pthread_create(&thread, NULL, handle_client, thread_data) != 0)
 				{
 					// close(socket_fd);
@@ -371,16 +393,30 @@ int main(int argc, char *argv[])
 				}
 				else
 				{
-					thread_data->client_fd = client_fd;
+					printf("Making thread\n");
+					
 					thread_data->is_socket_complete = false;
 					thread_data->thread_id = thread;
 					SLIST_INSERT_HEAD(&thread_data_head, thread_data, entries);
 				}
 			}
 		}
-	}
 
-	// freeing all the linked list as the signal is detected
+		struct thread_data_t *temp = NULL;
+		struct thread_data_t *next = NULL;
+
+		SLIST_FOREACH_SAFE(temp, &thread_data_head, entries, next)
+		{
+			if (temp->is_socket_complete == true)
+			{
+				pthread_join(temp->thread_id, NULL);
+				SLIST_REMOVE(&thread_data_head, temp, thread_data_t, entries);
+				free(temp);
+				temp = NULL;
+				printf("Removing Nodes\n");
+			}
+		}
+	}
 
 	while (!SLIST_EMPTY(&thread_data_head))
 	{
@@ -389,10 +425,11 @@ int main(int argc, char *argv[])
 		pthread_join(temp->thread_id, NULL);
 		SLIST_REMOVE_HEAD(&thread_data_head, entries);
 		free(temp);
+		// printf("Removing Nodes\n");
 	}
 
 	close(socket_fd);
-	// close(client_fd);
+	close(fd);
 
 	int ret = remove(filename);
 
