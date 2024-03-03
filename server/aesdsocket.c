@@ -24,7 +24,7 @@ int socket_fd, client_fd;
 pthread_mutex_t aesdsocket_mutex;
 pthread_t aesdsocket_threads[MAX_CONNECTIONS];
 int thread_count = 0;
-bool signal_detected = false;
+volatile bool signal_detected = false;
 char file_array[FILE_SIZE];
 struct sockaddr_in client_addr;
 char ip_addr[INET6_ADDRSTRLEN];
@@ -43,6 +43,7 @@ struct thread_data_t
 
 void daemonize(void);
 char filename[] = "/var/tmp/aesdsocketdata";
+
 void mysig(int signo)
 {
 	if (signo == SIGINT || signo == SIGTERM)
@@ -81,7 +82,7 @@ void *handle_client(void *arg)
 			{
 				syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 				close(data->client_fd);
-				pthread_mutex_unlock(&aesdsocket_mutex);
+				// pthread_mutex_unlock(&aesdsocket_mutex);
 				syslog(LOG_PERROR, "Error in opening of the file %s and with error code %d\n", filename, errno);
 				return NULL;
 			}
@@ -104,7 +105,7 @@ void *handle_client(void *arg)
 			{
 				syslog(LOG_DEBUG, "Closed connection from %s\n", ip_addr);
 				close(data->client_fd);
-				close(fd);
+				// close(fd);
 				syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
 				closelog();
 			}
@@ -166,16 +167,13 @@ void setup_signal()
 	sa.sa_flags = 0;
 	if (sigaction(SIGINT, &sa, NULL) == -1)
 	{
-		close(socket_fd);
-		close(client_fd);
 		syslog(LOG_PERROR, "Unable to initialise SIGINT the signals with error code %d\n", errno);
 		exit(-1);
 	}
 
 	if (sigaction(SIGTERM, &sa, NULL) == -1)
 	{
-		close(socket_fd);
-		close(client_fd);
+
 		syslog(LOG_PERROR, "Unable to initialise SIGTERM the signals with error code %d\n", errno);
 		exit(-1);
 	}
@@ -189,31 +187,31 @@ void timer_handler(int signum)
 	// using strftime to convert time structure to string
 	strftime(MY_TIME, sizeof(MY_TIME), "timestamp: %Y %M %d %H:%M:%S\n", tmp);
 
-	// Locking mutex to ensure thread safety
-	if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
-	{
-		syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
-		return;
-	}
+
 	int fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
 
 	if (fd == -1)
 	{
-		pthread_mutex_unlock(&aesdsocket_mutex);
+		// pthread_mutex_unlock(&aesdsocket_mutex);
 		syslog(LOG_PERROR, "Error in opening or creating the file %s with error code %d\n", filename, errno);
 		return;
 	}
 
 	// Convert time string to bytes for writing to file
 	size_t time_length = strlen(MY_TIME);
+		// Locking mutex to ensure thread safety
+	if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
+	{
+		syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
+		return;
+	}
 	ssize_t result = write(fd, MY_TIME, time_length);
 
 	if (result == -1)
 	{
-		pthread_mutex_unlock(&aesdsocket_mutex);
 		syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
 	}
-
+pthread_mutex_unlock(&aesdsocket_mutex);
 	// close(fd);
 	// Unlock mutex
 }
@@ -289,7 +287,7 @@ int main(int argc, char *argv[])
 	syslog(LOG_DEBUG, "Bind Successful\n");
 	freeaddrinfo(result);
 
-	errorcode = listen(socket_fd, 10);
+	errorcode = listen(socket_fd, 50);
 	if (errorcode == -1)
 	{
 		close(socket_fd);
@@ -343,7 +341,6 @@ int main(int argc, char *argv[])
 		client_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &client_addr_size);
 		if (client_fd == -1)
 		{
-			// close(socket_fd);
 			syslog(LOG_PERROR, "connection failed with error code %d and closing server socket \n", errno);
 			closelog();
 		}
@@ -388,13 +385,14 @@ int main(int argc, char *argv[])
 	while (!SLIST_EMPTY(&thread_data_head))
 	{
 		struct thread_data_t *temp = SLIST_FIRST(&thread_data_head);
+		close(temp->client_fd);
 		pthread_join(temp->thread_id, NULL);
 		SLIST_REMOVE_HEAD(&thread_data_head, entries);
 		free(temp);
 	}
 
 	close(socket_fd);
-	close(client_fd);
+	// close(client_fd);
 
 	int ret = remove(filename);
 
@@ -410,6 +408,7 @@ int main(int argc, char *argv[])
 	syslog(LOG_DEBUG, "Process Completed\n");
 	closelog();
 	exit(EXIT_SUCCESS);
+	return 0;
 }
 
 void daemonize(void)
