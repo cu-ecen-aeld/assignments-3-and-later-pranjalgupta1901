@@ -25,7 +25,6 @@ pthread_mutex_t aesdsocket_mutex;
 pthread_t aesdsocket_threads[MAX_CONNECTIONS];
 int thread_count = 0;
 volatile bool signal_detected = false;
-char file_array[FILE_SIZE];
 struct sockaddr_in client_addr;
 char ip_addr[INET6_ADDRSTRLEN];
 time_t t;
@@ -37,7 +36,6 @@ struct thread_data_t
 	int client_fd;
 	pthread_t thread_id;
 	bool is_socket_complete;
-	// int file_fd;
 	SLIST_ENTRY(thread_data_t)
 	entries;
 };
@@ -479,6 +477,7 @@ int main(int argc, char *argv[])
 	close(socket_fd);
 	// close(fd);
 	pthread_mutex_destroy(&aesdsocket_mutex);
+	timer_delete(timerid);
 
 	// Remove temporary file
 	int ret = remove(filename);

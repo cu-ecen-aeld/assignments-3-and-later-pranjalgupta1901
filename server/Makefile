@@ -1,10 +1,14 @@
 # DEFAULT TARGET
+
+CC ?= $(CROSS_COMPIPLE)gcc
+CFLAGS ?= -g -Wall -Werror
+LDFLAGS ?= -lpthread -lrt
 TARGET := aesdsocket
 all: $(TARGET)
 
 # BUILDING THE WRITER FILE
 $(TARGET): aesdsocket.c
-	$(CC) $< -o $@ -lrt -lpthread
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
 	chmod +x $@
 #	mv $@.o $@
 	
