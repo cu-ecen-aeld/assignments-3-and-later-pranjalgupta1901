@@ -1,21 +1,15 @@
-# DEFAULT TARGET
-
 CC ?= $(CROSS_COMPIPLE)gcc
 CFLAGS ?= -g -Wall -Werror
 LDFLAGS ?= -lpthread -lrt
-TARGET := aesdsocket
-all: $(TARGET)
+TARGET ?= aesdsocket
+all: aesdsocket
 
 # BUILDING THE WRITER FILE
-$(TARGET): aesdsocket.c
-	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
-	chmod +x $@
-#	mv $@.o $@
-	
-#Execute Permissions to target file
+aesdsocket: aesdsocket.c
+	$(CC) $(CFLAGS) $^ -o $@ $(INCLUDES) $(LDFLAGS)
 
 # CLEAN TARGET
 clean:
-	-rm $(TARGET)
+	-rm aesdsocket
 
 .PHONY: clean
