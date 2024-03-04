@@ -17,8 +17,8 @@
 #include <time.h>
 #include "queue.h"
 
-#define FILE_SIZE 8192
-#define MAX_CONNECTIONS 30
+#define FILE_SIZE 1024
+#define MAX_CONNECTIONS 100
 
 int socket_fd, client_fd;
 pthread_mutex_t aesdsocket_mutex;
@@ -31,14 +31,13 @@ char ip_addr[INET6_ADDRSTRLEN];
 time_t t;
 struct tm *tmp;
 char MY_TIME[50];
-// int fd;
 
 struct thread_data_t
 {
 	int client_fd;
 	pthread_t thread_id;
 	bool is_socket_complete;
-	int file_fd;
+	// int file_fd;
 	SLIST_ENTRY(thread_data_t)
 	entries;
 };
@@ -53,105 +52,169 @@ void mysig(int signo)
 		signal_detected = true;
 	}
 }
-
 void *handle_client(void *arg)
 {
     struct thread_data_t *data = (struct thread_data_t *)arg;
     syslog(LOG_DEBUG, "Receive Started\n");
 
-    int fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
+    int fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+
     if (fd == -1)
     {
         syslog(LOG_PERROR, "Error opening or creating the file %s with error code %d\n", filename, errno);
         close(data->client_fd);
-        data->is_socket_complete = false;
+        data->is_socket_complete = true;
         return NULL;
     }
 
-    int bytes_rec;
     bool rec_complete = false;
-    char *ptr = NULL;
+    int offset = 0;
+    char *data_ptr = (char *)malloc(sizeof(char) * FILE_SIZE);
 
     while (!rec_complete)
     {
-        bytes_rec = recv(data->client_fd, file_array, FILE_SIZE, 0);
-        if (bytes_rec < 0)
+        ssize_t bytes_rec = recv(data->client_fd, data_ptr + offset, sizeof(char) * (FILE_SIZE - offset), 0);
+        if (bytes_rec <= 0)
         {
-            syslog(LOG_PERROR, "Receive unsuccessful with error code %d\n", errno);
-            close(data->client_fd);
-            data->is_socket_complete = false;
             break;
         }
-
-        ptr = memchr(file_array, '\n', bytes_rec);
-        if (ptr != NULL)
+        offset += bytes_rec;
+        if (offset >= FILE_SIZE)
         {
-            rec_complete = true;
+            char *new_data_ptr = (char *)realloc(data_ptr, sizeof(char) * (offset + FILE_SIZE));
+            if (new_data_ptr != NULL)
+            { // realloc success
+                data_ptr = new_data_ptr;
+            }
+            else
+            { // realloc failed
+                syslog(LOG_PERROR, "realloc failed with error code %d\n", errno);
+                close(data->client_fd);
+                data->is_socket_complete = true;
+                close(fd);
+                free(data_ptr);
+				free(new_data_ptr);
+                return NULL;
+            }
+			free(new_data_ptr);
         }
 
+        if (memchr(data_ptr, '\n', offset) != NULL)
+        {
+            rec_complete = true;
+            break;
+        }
+    }
+
+    // Lock the mutex before writing to the file if receive is complete
+    if (rec_complete)
+    {	
         if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
         {
             syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
             close(data->client_fd);
-            data->is_socket_complete = false;
-            break;
+            data->is_socket_complete = true;
+            close(fd);
+            free(data_ptr);
+            return NULL;
         }
 
-        ssize_t result = write(fd, file_array, bytes_rec);
-        pthread_mutex_unlock(&aesdsocket_mutex);
-
+        ssize_t result = write(fd, data_ptr, offset);
         if (result == -1)
         {
             syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
+
+            close(fd);
+            free(data_ptr);
             close(data->client_fd);
-            data->is_socket_complete = false;
-            break;
-        }
-    }
-
-    if (lseek(fd, 0, SEEK_SET) == -1)
-    {
-        syslog(LOG_PERROR, "Unable to reset the file pointer of file %s with error code %d\n", filename, errno);
-        close(data->client_fd);
-        data->is_socket_complete = false;
-        close(fd);
-        return NULL;
-    }
-
-    syslog(LOG_DEBUG, "Sending Started\n");
-    int bytes_send;
-    bool send_complete = false;
-
-    while (!send_complete && rec_complete)
-    {
-        bytes_send = read(fd, file_array, FILE_SIZE);
-        if (bytes_send < 0)
-        {
-            syslog(LOG_PERROR, "Error in reading data from the file for sending\n");
-            close(data->client_fd);
-            data->is_socket_complete = false;
-            break;
-        }
-        else if (bytes_send == 0)
-        {
-            send_complete = true;
-            rec_complete = false;
             data->is_socket_complete = true;
-            break;
+            pthread_mutex_unlock(&aesdsocket_mutex);
+            return NULL;
         }
 
-        int sent_actual = send(data->client_fd, file_array, bytes_send, 0);
-        if (sent_actual != bytes_send)
+        // Unlock the mutex after writing to the file
+        pthread_mutex_unlock(&aesdsocket_mutex);
+
+        struct stat st;
+        if (fstat(fd, &st) == -1)
         {
-            syslog(LOG_PERROR, "Error in sending data to socket\n");
+            syslog(LOG_PERROR, "Error getting file status with error code %d\n", errno);
             close(data->client_fd);
-            data->is_socket_complete = false;
-            break;
+            data->is_socket_complete = true;
+            close(fd);
+            free(data_ptr);
+            return NULL;
         }
+
+        off_t file_size = st.st_size;
+        if (lseek(fd, 0, SEEK_SET) == -1)
+        {
+            syslog(LOG_PERROR, "Unable to reset the file pointer of file %s with error code %d\n", filename, errno);
+            close(data->client_fd);
+            data->is_socket_complete = true;
+            close(fd);
+            free(data_ptr);
+            return NULL;
+        }
+
+        syslog(LOG_DEBUG, "Sending Started\n");
+        int bytes_send;
+        bool send_complete = false;
+
+        char *read_ptr = (char *)malloc(sizeof(char) * (file_size + 1));
+        if (read_ptr == NULL)
+        {
+            syslog(LOG_PERROR, "Not enough memory for read pointer\n");
+            close(data->client_fd);
+            data->is_socket_complete = true;
+            close(fd);
+            free(data_ptr);
+            return NULL;
+        }
+
+        while (!send_complete)
+        {
+            bytes_send = read(fd, read_ptr, file_size);
+            if (bytes_send < 0)
+            {
+                syslog(LOG_PERROR, "Error in reading data from the file for sending\n");
+                close(data->client_fd);
+                data->is_socket_complete = true;
+                close(fd);
+                free(read_ptr);
+                free(data_ptr);
+                break;
+            }
+            else if (bytes_send == 0)
+            {
+                send_complete = true;
+                break;
+            }
+
+            int sent_actual = send(data->client_fd, read_ptr, bytes_send, 0);
+            if (sent_actual != bytes_send)
+            {
+                syslog(LOG_PERROR, "Error in sending data to socket\n");
+                close(data->client_fd);
+                data->is_socket_complete = true;
+                close(fd);
+                free(read_ptr);
+                free(data_ptr);
+                break;
+            }
+        }
+
+        free(read_ptr);
+    }
+    else
+    {
+        syslog(LOG_PERROR, "Reception is not complete\n");
     }
 
-    close(fd);
     close(data->client_fd);
+    close(fd);
+    free(data_ptr);
+
     return NULL;
 }
 
@@ -182,9 +245,9 @@ void timer_handler(int signum)
 	tmp = localtime(&t);
 
 	// using strftime to convert time structure to string
-	strftime(MY_TIME, sizeof(MY_TIME), "timestamp: %Y %m %d %H:%M:%S\n", tmp); // Corrected the format specifier for month (use %m instead of %M)
+	strftime(MY_TIME, sizeof(MY_TIME), "timestamp: %Y %m %d %H:%M:%S\n", tmp);
 
-	int fd = open(filename, O_RDWR | O_CREAT | O_APPEND, S_IRWXU | S_IRWXG | S_IRWXO);
+	int fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
 
 	if (fd == -1)
 	{
@@ -261,6 +324,8 @@ int main(int argc, char *argv[])
 	}
 	syslog(LOG_DEBUG, "Socket Created with Socket Id %d\n", socket_fd);
 
+	int flags = fcntl(socket_fd, F_GETFL, 0);
+	fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
 	// Set socket option
 	int var_setsockopt = 1;
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &var_setsockopt, sizeof(int)) == -1)
@@ -282,6 +347,12 @@ int main(int argc, char *argv[])
 	syslog(LOG_DEBUG, "Bind Successful\n");
 
 	freeaddrinfo(result);
+
+	if (argc > 1 && strcmp(argv[1], "-d") == 0)
+	{
+		syslog(LOG_USER, "Daemonizing process\n");
+		daemonize();
+	}
 
 	// Listen for connections
 	errorcode = listen(socket_fd, 50);
@@ -407,6 +478,7 @@ int main(int argc, char *argv[])
 	// Close sockets and files
 	close(socket_fd);
 	// close(fd);
+	pthread_mutex_destroy(&aesdsocket_mutex);
 
 	// Remove temporary file
 	int ret = remove(filename);
