@@ -1,4 +1,5 @@
 # Complete OOPS Dump
+```
 Unable to handle kernel NULL pointer dereference at virtual address 0000000000000000
 Mem abort info:
   ESR = 0x96000045
@@ -41,10 +42,10 @@ Call trace:
  el0t_64_sync+0x1a0/0x1a4
 Code: d2800001 d2800000 d503233f d50323bf (b900003f)
 ---[ end trace 890cb1df3afab108 ]---
-
+```
 
 # OBJDUMP of Faulty.ko
-
+```
 0000000000000000 <faulty_write>:
    0:   d503245f bti    c
    4:   d2800001 mov    x1, #0x0                   // #0
@@ -54,9 +55,11 @@ Code: d2800001 d2800000 d503233f d50323bf (b900003f)
   14:   b900003f str    wzr, [x1]
   18:   d65f03c0 ret
   1c:   d503201f nop
-
+```
 # Program Counter
+```
 pc : faulty_write+0x14/0x20 [faulty]
+```
 
 
 # Explanation
