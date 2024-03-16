@@ -43,121 +43,110 @@ int aesd_release(struct inode *inode, struct file *filp)
     filp->private_data = NULL;
     return 0;
 }
-
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
-                loff_t *f_pos)
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = 0;
-    PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
 
-if(filp == NULL || buf == NULL || f_pos == NULL || *f_pos < 0)
-	return retval;
+    PDEBUG("read %zu bytes with offset %lld", count, *f_pos);
 
-struct aesd_dev *dev = filp->private_data;
-size_t entry_offset = 0;
-size_t remaining_bytes = 0;
+    if (filp == NULL || buf == NULL || f_pos == NULL || *f_pos < 0)
+        return -EINVAL; // Invalid argument
 
-if(mutex_lock_interruptible(&dev->mutex))
-	return -ERESTARTSYS;
+    struct aesd_dev *dev = filp->private_data;
+    if (dev == NULL)
+        return -EINVAL; // Invalid argument
 
-struct aesd_buffer_entry *temp_entry =  aesd_circular_buffer_find_entry_offset_for_fpos(&dev->buffer, *f_pos, &entry_offset);
-if(temp_entry == NULL)
-	return retval;
+    if (mutex_lock_interruptible(&dev->mutex))
+        return -ERESTARTSYS;
 
-remaining_bytes = temp_entry->size - entry_offset;
-if(remaining_bytes <= count)
-	remaining_bytes = count;
+    struct aesd_buffer_entry *temp_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->buffer, *f_pos, NULL);
+    if (temp_entry == NULL) {
+        mutex_unlock(&dev->mutex);
+        return 0; // End of file
+    }
 
-unsigned long bytes_not_copied = copy_to_user(buf, temp_entry->buffptr, remaining_bytes);
-if(bytes_not_copied != 0){
-//	return remaining_bytes - bytes_not_copied;
-	 mutex_unlock(&dev->mutex);
-        // Handle copy_to_user failure
-        return -EFAULT;
+    size_t entry_offset = *f_pos % temp_entry->size; // Adjust offset within the entry
+    size_t remaining_bytes = temp_entry->size - entry_offset;
+    size_t bytes_to_copy = min(remaining_bytes, count);
+
+    unsigned long bytes_not_copied = copy_to_user(buf, temp_entry->buffptr + entry_offset, bytes_to_copy);
+    if (bytes_not_copied != 0) {
+        mutex_unlock(&dev->mutex);
+        return -EFAULT; // Failed to copy data to user space
+    }
+
+    *f_pos += bytes_to_copy;
+    mutex_unlock(&dev->mutex);
+    return bytes_to_copy;
 }
 
-	*f_pos = *f_pos + remaining_bytes;
-	mutex_unlock(&dev->mutex);
-	retval = remaining_bytes;
-
-    return retval;
-}
 
 
-ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
-                loff_t *f_pos)
+ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
-
-    // Check if file pointer or buffer pointer is NULL
-    if (filp == NULL || buf == NULL)
-        return retval;
-
-    // Debug print statement
-    PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
-
     int pos = 0;
     int prev_length = 0;
     bool rec_complete = false;
     struct aesd_dev *dev = NULL;
-    char *data_ptr = kmalloc(sizeof(char) * count, GFP_KERNEL);
+    char *data_ptr;
+    char *ptr;
+
+    if (filp == NULL || buf == NULL)
+        return retval;
+
+    PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
+
+    data_ptr = kmalloc(sizeof(char) * count, GFP_KERNEL);
     if (data_ptr == NULL) {
-        // Memory allocation failure
         PDEBUG("Memory Allocation Failed\n");
         return retval;
     }
 
     unsigned long bytes_not_copied = copy_from_user(data_ptr, buf, count);
     if (bytes_not_copied != 0) {
-        // Data copy from user space failed
         PDEBUG("Data copy failed\n");
         kfree(data_ptr);
         return retval;
     }
 
-    char *ptr = memchr(data_ptr, '\n', count);
-    // Check if newline character is received or not
+    ptr = memchr(data_ptr, '\n', count);
     if (ptr == NULL) {
         pos = count;
     } else {
-        // Newline character received
-        pos = ptr - data_ptr + 1; // Include newline character
+        pos = ptr - data_ptr + 1;
         rec_complete = true;
     }
+
     dev = filp->private_data;
-   if(mutex_lock_interruptible(&dev->mutex)){  // lock before accessing shared resources
-	return -ERESTARTSYS;
-}
+    if (mutex_lock_interruptible(&dev->mutex)) {
+        kfree(data_ptr);
+        return -ERESTARTSYS;
+    }
+
     prev_length = dev->entry.size;
     dev->entry.size += pos;
     char *new_data_ptr = (char *)krealloc(dev->entry.buffptr, dev->entry.size, GFP_KERNEL);
-    if (new_data_ptr != NULL)
-    { // Reallocation success
-        dev->entry.buffptr = new_data_ptr;
-    }
-    else
-    { // Reallocation failed
+    if (new_data_ptr == NULL) {
         PDEBUG("Memory reallocation Failed\n");
         kfree(data_ptr);
         mutex_unlock(&dev->mutex);
         return retval;
     }
 
-    // Assuming aesd_device.entry.buffptr points to a valid memory location
-    // Copy data to buffer with offset
-    memcpy(dev->entry.buffptr + prev_length, data_ptr, pos);
+    dev->entry.buffptr = new_data_ptr;
 
-    if (rec_complete == true)
-    {
-        // Add entry to circular buffer
+    // Cast away const qualifier
+    memcpy(dev->entry.buffptr + prev_length, (void *)data_ptr, pos);
+
+    if (rec_complete) {
         const char *ret_ptr = aesd_circular_buffer_add_entry(&dev->buffer, &dev->entry);
-        if (ret_ptr != NULL)
-        {
+        if (ret_ptr != NULL) {
             kfree(ret_ptr);
         }
     }
 
-    mutex_unlock(&dev->mutex); // Unlock the mutex before freeing data_ptr
+    mutex_unlock(&dev->mutex);
     kfree(data_ptr);
     return pos;
 }

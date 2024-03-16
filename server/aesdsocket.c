@@ -135,12 +135,14 @@ void *handle_client(void *arg)
             data->is_socket_complete = true;
 #if !(USE_AESD_CHAR_DEVICE)
             pthread_mutex_unlock(&aesdsocket_mutex);
-            return NULL;
+#endif 
+	    return NULL;
         }
 
+#if !(USE_AESD_CHAR_DEVICE)
         // Unlock the mutex after writing to the file
         pthread_mutex_unlock(&aesdsocket_mutex);
-
+#endif
         struct stat st;
         if (fstat(fd, &st) == -1)
         {
@@ -290,14 +292,14 @@ int main(int argc, char *argv[])
 
 	openlog(NULL, LOG_CONS | LOG_PID, LOG_USER);
 
-	// Initialize mutex
+#if !(USE_AESD_CHAR_DEVICE)	// Initialize mutex
 	if (pthread_mutex_init(&aesdsocket_mutex, NULL) != 0)
 	{
 		syslog(LOG_PERROR, "Mutex initialization failed\n");
 		closelog();
 		exit(EXIT_FAILURE);
 	}
-
+#endif
 	// Setup signal handlers
 	setup_signal();
 
@@ -330,8 +332,6 @@ int main(int argc, char *argv[])
 	}
 	syslog(LOG_DEBUG, "Socket Created with Socket Id %d\n", socket_fd);
 
-//	int flags = fcntl(socket_fd, F_GETFL, 0);
-//	fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
 	// Set socket option
 	int var_setsockopt = 1;
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &var_setsockopt, sizeof(int)) == -1)
@@ -369,7 +369,7 @@ int main(int argc, char *argv[])
 		closelog();
 		exit(EXIT_FAILURE);
 	}
-#if USE_AESD_CHAR_DEVICE==0
+#if !(USE_AESD_CHAR_DEVICE)
 	// Set up signal handler for SIGALRM
 	struct sigaction sa;
 	sa.sa_handler = timer_handler;
@@ -485,9 +485,10 @@ int main(int argc, char *argv[])
 	// Close sockets and files
 	close(socket_fd);
 	// close(fd);
+#if !(USE_AESD_CHAR_DEVICE)
 	pthread_mutex_destroy(&aesdsocket_mutex);
-
-#if (USE_AESD_CHAR_DEVICE == 0)
+#endif
+#if !(USE_AESD_CHAR_DEVICE)
 	timer_delete(timerid);
 	int ret = remove(filename);
 	if (ret == 0)
