@@ -31,6 +31,8 @@ time_t t;
 struct tm *tmp;
 char MY_TIME[50];
 
+#define USE_AESD_CHAR_DEVICE 1
+
 struct thread_data_t
 {
 	int client_fd;
@@ -41,7 +43,11 @@ struct thread_data_t
 };
 
 void daemonize(void);
+#ifdef USE_AESD_CHAR_DEVICE
+char filename[] = "/dev/aesdchar";
+#else
 char filename[] = "/var/tmp/aesdsocketdata";
+#endif
 
 void mysig(int signo)
 {
@@ -106,7 +112,8 @@ void *handle_client(void *arg)
 
     // Lock the mutex before writing to the file if receive is complete
     if (rec_complete)
-    {	
+    {
+#if !(USE_AESD_CHAR_DEVICE) 	
         if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
         {
             syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
@@ -116,7 +123,7 @@ void *handle_client(void *arg)
             free(data_ptr);
             return NULL;
         }
-
+#endif
         ssize_t result = write(fd, data_ptr, offset);
         if (result == -1)
         {
@@ -126,6 +133,7 @@ void *handle_client(void *arg)
             free(data_ptr);
             close(data->client_fd);
             data->is_socket_complete = true;
+#if !(USE_AESD_CHAR_DEVICE)
             pthread_mutex_unlock(&aesdsocket_mutex);
             return NULL;
         }
@@ -322,8 +330,8 @@ int main(int argc, char *argv[])
 	}
 	syslog(LOG_DEBUG, "Socket Created with Socket Id %d\n", socket_fd);
 
-	int flags = fcntl(socket_fd, F_GETFL, 0);
-	fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+//	int flags = fcntl(socket_fd, F_GETFL, 0);
+//	fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
 	// Set socket option
 	int var_setsockopt = 1;
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &var_setsockopt, sizeof(int)) == -1)
@@ -361,7 +369,7 @@ int main(int argc, char *argv[])
 		closelog();
 		exit(EXIT_FAILURE);
 	}
-
+#if USE_AESD_CHAR_DEVICE==0
 	// Set up signal handler for SIGALRM
 	struct sigaction sa;
 	sa.sa_handler = timer_handler;
@@ -399,6 +407,7 @@ int main(int argc, char *argv[])
 		closelog();
 		exit(EXIT_FAILURE);
 	}
+#endif	
 
 	// Accept and handle incoming connections
 	while (!signal_detected)
@@ -477,9 +486,9 @@ int main(int argc, char *argv[])
 	close(socket_fd);
 	// close(fd);
 	pthread_mutex_destroy(&aesdsocket_mutex);
-	timer_delete(timerid);
 
-	// Remove temporary file
+#if (USE_AESD_CHAR_DEVICE == 0)
+	timer_delete(timerid);
 	int ret = remove(filename);
 	if (ret == 0)
 	{
@@ -489,6 +498,7 @@ int main(int argc, char *argv[])
 	{
 		syslog(LOG_PERROR, "Unable to delete file %s with error code %d\n", filename, errno);
 	}
+#endif
 
 	syslog(LOG_DEBUG, "Process Completed\n");
 	closelog();
@@ -537,3 +547,4 @@ void daemonize(void)
 	dup2(var_daemon, STDERR_FILENO);
 	close(var_daemon);
 }
+
