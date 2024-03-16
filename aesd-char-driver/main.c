@@ -40,6 +40,7 @@ int aesd_open(struct inode *inode, struct file *filp)
 int aesd_release(struct inode *inode, struct file *filp)
 {
     PDEBUG("release");
+    filp->private_data = NULL;
     return 0;
 }
 
@@ -216,8 +217,12 @@ void aesd_cleanup_module(void)
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
+struct aesd_buffer_entry *entry;
+uint8_t index = 0;
+AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.buffer, index){
+kfree(entry->buffptr);
+}
 
-    
 mutex_destroy(&aesd_device.mutex);
 
     unregister_chrdev_region(devno, 1);
