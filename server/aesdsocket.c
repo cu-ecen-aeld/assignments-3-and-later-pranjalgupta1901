@@ -30,8 +30,8 @@ char ip_addr[INET6_ADDRSTRLEN];
 time_t t;
 struct tm *tmp;
 char MY_TIME[50];
-
-#define USE_AESD_CHAR_DEVICE 0
+int fd;
+#define USE_AESD_CHAR_DEVICE 1
 
 struct thread_data_t
 {
@@ -56,177 +56,144 @@ void mysig(int signo)
 		signal_detected = true;
 	}
 }
+
+
 void *handle_client(void *arg)
 {
-    struct thread_data_t *data = (struct thread_data_t *)arg;
-    syslog(LOG_DEBUG, "Receive Started\n");
-//S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH
-    int fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
-    //int fd = open(filename,O_WRONLY|O_APPEND);
+ struct thread_data_t *data = (struct thread_data_t *)arg;
+syslog(LOG_DEBUG, "Receive Started\n");
+bool rec_complete = false;
+int offset = 0;
+char *data_ptr = (char *)malloc(sizeof(char) * FILE_SIZE);
+
+while (!rec_complete)
+{
+    ssize_t bytes_rec = recv(data->client_fd, data_ptr + offset, sizeof(char) * (FILE_SIZE - offset), 0);
+    if (bytes_rec <= 0)
+    {
+        break;
+    }
+    offset += bytes_rec;
+    if (offset >= FILE_SIZE)
+    {
+        char *new_data_ptr = (char *)realloc(data_ptr, sizeof(char) * (offset + FILE_SIZE));
+        if (new_data_ptr != NULL)
+        { // realloc success
+            data_ptr = new_data_ptr;
+        }
+        else
+        { // realloc failed
+            syslog(LOG_PERROR, "realloc failed with error code %d\n", errno);
+            close(data->client_fd);
+            data->is_socket_complete = true;
+            free(data_ptr);
+            return NULL;
+        }
+    }
+
+    if (memchr(data_ptr, '\n', offset) != NULL)
+    {
+        rec_complete = true;
+        break;
+    }
+}
+
+// Lock the mutex before writing to the file if receive is complete
+if (rec_complete)
+{
+     fd = open(filename, O_WRONLY | O_APPEND);
 
     if (fd == -1)
     {
         syslog(LOG_PERROR, "Error opening or creating the file %s with error code %d\n", filename, errno);
         close(data->client_fd);
         data->is_socket_complete = true;
+        free(data_ptr);
         return NULL;
     }
 
-    bool rec_complete = false;
-    int offset = 0;
-    char *data_ptr = (char *)malloc(sizeof(char) * FILE_SIZE);
-
-    while (!rec_complete)
+    if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
     {
-        ssize_t bytes_rec = recv(data->client_fd, data_ptr + offset, sizeof(char) * (FILE_SIZE - offset), 0);
-        if (bytes_rec <= 0)
-        {
-            break;
-        }
-        offset += bytes_rec;
-        if (offset >= FILE_SIZE)
-        {
-            char *new_data_ptr = (char *)realloc(data_ptr, sizeof(char) * (offset + FILE_SIZE));
-            if (new_data_ptr != NULL)
-            { // realloc success
-                data_ptr = new_data_ptr;
-            }
-            else
-            { // realloc failed
-                syslog(LOG_PERROR, "realloc failed with error code %d\n", errno);
-                close(data->client_fd);
-                data->is_socket_complete = true;
-                close(fd);
-                free(data_ptr);
-				free(new_data_ptr);
-                return NULL;
-            }
-			free(new_data_ptr);
-        }
-
-        if (memchr(data_ptr, '\n', offset) != NULL)
-        {
-            rec_complete = true;
-            break;
-        }
+        syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
+        close(data->client_fd);
+        data->is_socket_complete = true;
+        close(fd);
+        free(data_ptr);
+        return NULL;
     }
 
-    // Lock the mutex before writing to the file if receive is complete
-    if (rec_complete)
+    ssize_t result = write(fd, data_ptr, offset);
+    if (result == -1)
     {
-//#if !(USE_AESD_CHAR_DEVICE) 	
-        if (pthread_mutex_lock(&aesdsocket_mutex) != 0)
-        {
-            syslog(LOG_PERROR, "Mutex Lock Failed with error code %d\n", errno);
-            close(data->client_fd);
-            data->is_socket_complete = true;
-            close(fd);
-            free(data_ptr);
-            return NULL;
-        }
-//#endif
-        ssize_t result = write(fd, data_ptr, offset);
-        if (result == -1)
-        {
-            syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
+        syslog(LOG_PERROR, "Unable to write to the file %s with error code %d\n", filename, errno);
 
-            close(fd);
-            free(data_ptr);
-            close(data->client_fd);
-            data->is_socket_complete = true;
-//#if !(USE_AESD_CHAR_DEVICE)
-            pthread_mutex_unlock(&aesdsocket_mutex);
-//#endif 
-	    return NULL;
-        }
-
-//#if !(USE_AESD_CHAR_DEVICE)
-        // Unlock the mutex after writing to the file
+        close(fd);
+        free(data_ptr);
+        close(data->client_fd);
+        data->is_socket_complete = true;
         pthread_mutex_unlock(&aesdsocket_mutex);
-//#endif
-
-        struct stat st;
-        if (fstat(fd, &st) == -1)
-        {
-            syslog(LOG_PERROR, "Error getting file status with error code %d\n", errno);
-            close(data->client_fd);
-            data->is_socket_complete = true;
-            close(fd);
-            free(data_ptr);
-            return NULL;
-        }
-
-        off_t file_size = st.st_size;
-        if (lseek(fd, 0, SEEK_SET) == -1)
-        {
-            syslog(LOG_PERROR, "Unable to reset the file pointer of file %s with error code %d\n", filename, errno);
-            close(data->client_fd);
-            data->is_socket_complete = true;
-            close(fd);
-            free(data_ptr);
-            return NULL;
-        }
-
-        syslog(LOG_DEBUG, "Sending Started\n");
-        int bytes_send;
-        bool send_complete = false;
-
-        char *read_ptr = (char *)malloc(sizeof(char) * (file_size + 1));
-        if (read_ptr == NULL)
-        {
-            syslog(LOG_PERROR, "Not enough memory for read pointer\n");
-            close(data->client_fd);
-            data->is_socket_complete = true;
-            close(fd);
-            free(data_ptr);
-            return NULL;
-        }
-
-        while (!send_complete)
-        {
-            bytes_send = read(fd, read_ptr, file_size);
-            if (bytes_send < 0)
-            {
-                syslog(LOG_PERROR, "Error in reading data from the file for sending\n");
-                close(data->client_fd);
-                data->is_socket_complete = true;
-                close(fd);
-                free(read_ptr);
-                free(data_ptr);
-                break;
-            }
-            else if (bytes_send == 0)
-            {
-                send_complete = true;
-                break;
-            }
-	
-	//printf("the received string is %s\n", read_ptr);
-            int sent_actual = send(data->client_fd, read_ptr, bytes_send, 0);
-            if (sent_actual != bytes_send)
-            {
-                syslog(LOG_PERROR, "Error in sending data to socket\n");
-                close(data->client_fd);
-                data->is_socket_complete = true;
-                close(fd);
-                free(read_ptr);
-                free(data_ptr);
-                break;
-            }
-        }
-
-        free(read_ptr);
+        return NULL;
     }
-    else
+
+    pthread_mutex_unlock(&aesdsocket_mutex);
+
+    close(fd); // Close the file after writing
+
+    syslog(LOG_DEBUG, "Sending Started\n");
+    int bytes_send;
+    bool send_complete = false;
+
+    fd = open(filename, O_RDONLY); // Reopen the file for reading
+    if (fd == -1)
     {
-        syslog(LOG_PERROR, "Reception is not complete\n");
+        syslog(LOG_PERROR, "Error opening the file %s for reading with error code %d\n", filename, errno);
+        close(data->client_fd);
+        data->is_socket_complete = true;
+        free(data_ptr);
+        return NULL;
+    }
+	char data_buf[FILE_SIZE];
+    while (!send_complete)
+    {
+        bytes_send = read(fd, data_buf, FILE_SIZE);
+        if (bytes_send < 0)
+        {
+            syslog(LOG_PERROR, "Error reading data from the file for sending\n");
+            close(data->client_fd);
+            data->is_socket_complete = true;
+            close(fd);
+            free(data_ptr);
+            break;
+        }
+        else if (bytes_send == 0)
+        {
+            send_complete = true;
+            break;
+        }
+
+        int sent_actual = send(data->client_fd, data_buf, bytes_send, 0);
+        if (sent_actual != bytes_send)
+        {
+            syslog(LOG_PERROR, "Error sending data to socket\n");
+            close(data->client_fd);
+            data->is_socket_complete = true;
+            close(fd);
+            free(data_ptr);
+            break;
+        }
     }
 
-    close(data->client_fd);
-    close(fd);
-    free(data_ptr);
+}
+else
+{
+    syslog(LOG_PERROR, "Reception is not complete\n");
+}
 
-    return NULL;
+close(data->client_fd);
+free(data_ptr);
+
+return NULL;
+
 }
 
 void setup_signal()
@@ -295,14 +262,14 @@ int main(int argc, char *argv[])
 
 	openlog(NULL, LOG_CONS | LOG_PID, LOG_USER);
 
-//#if !(USE_AESD_CHAR_DEVICE)	// Initialize mutex
+#if !(USE_AESD_CHAR_DEVICE)	// Initialize mutex
 	if (pthread_mutex_init(&aesdsocket_mutex, NULL) != 0)
 	{
 		syslog(LOG_PERROR, "Mutex initialization failed\n");
 		closelog();
 		exit(EXIT_FAILURE);
 	}
-//#endif
+#endif
 	// Setup signal handlers
 	setup_signal();
 
@@ -372,7 +339,7 @@ int main(int argc, char *argv[])
 		closelog();
 		exit(EXIT_FAILURE);
 	}
-#if (USE_AESD_CHAR_DEVICE)
+#if !(USE_AESD_CHAR_DEVICE)
 	// Set up signal handler for SIGALRM
 	struct sigaction sa;
 	sa.sa_handler = timer_handler;
@@ -489,8 +456,9 @@ int main(int argc, char *argv[])
 	close(socket_fd);
 	// close(fd);
 
+	
+#if !(USE_AESD_CHAR_DEVICE)
 	pthread_mutex_destroy(&aesdsocket_mutex);
-#if (USE_AESD_CHAR_DEVICE)
 	timer_delete(timerid);
 	int ret = remove(filename);
 	if (ret == 0)
