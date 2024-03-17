@@ -43,48 +43,64 @@ int aesd_release(struct inode *inode, struct file *filp)
     filp->private_data = NULL;
     return 0;
 }
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
+
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
+                  loff_t *f_pos)
 {
     ssize_t retval = 0;
-
     PDEBUG("read %zu bytes with offset %lld", count, *f_pos);
 
     if (filp == NULL || buf == NULL || f_pos == NULL || *f_pos < 0)
-        return -EINVAL; // Invalid argument
+    {
+        PDEBUG("Invalid arguments");
+        return retval;
+    }
 
     struct aesd_dev *dev = filp->private_data;
-    if (dev == NULL)
-        return -EINVAL; // Invalid argument
+    size_t entry_offset = 0;
+    size_t remaining_bytes = 0;
 
     if (mutex_lock_interruptible(&dev->mutex))
+    {
+        PDEBUG("Failed to lock mutex");
         return -ERESTARTSYS;
+    }
+    PDEBUG("Mutex locked");
 
-    struct aesd_buffer_entry *temp_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->buffer, *f_pos, NULL);
-    if (temp_entry == NULL) {
+    struct aesd_buffer_entry *temp_entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->buffer, *f_pos, &entry_offset);
+    if (temp_entry == NULL)
+    {
+        PDEBUG("Failed to find entry for given file position");
         mutex_unlock(&dev->mutex);
-        return 0; // End of file
+        PDEBUG("Mutex unlocked due to entry not found");
+        return retval;
     }
 
-    size_t entry_offset = *f_pos % temp_entry->size; // Adjust offset within the entry
-    size_t remaining_bytes = temp_entry->size - entry_offset;
-    size_t bytes_to_copy = min(remaining_bytes, count);
-
-    unsigned long bytes_not_copied = copy_to_user(buf, temp_entry->buffptr + entry_offset, bytes_to_copy);
-    if (bytes_not_copied != 0) {
+    remaining_bytes = temp_entry->size - entry_offset;
+    if (remaining_bytes >= count)
+        remaining_bytes = count;
+	
+    unsigned long bytes_not_copied = copy_to_user(buf, temp_entry->buffptr + entry_offset, remaining_bytes);
+    if (bytes_not_copied != 0)
+    {
+        PDEBUG("Failed to copy data to user space");
         mutex_unlock(&dev->mutex);
-        return -EFAULT; // Failed to copy data to user space
+        PDEBUG("Mutex unlocked due to copy failure");
+        return -EFAULT;
     }
-
-    *f_pos += bytes_to_copy;
+            
+    *f_pos += remaining_bytes;
     mutex_unlock(&dev->mutex);
-    return bytes_to_copy;
-}
+    PDEBUG("Mutex unlocked");
+    retval = remaining_bytes;
 
+    return retval;
+}
 
 
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
-    ssize_t retval = -ENOMEM;
+    ssize_t retval = 0;
     int pos = 0;
     int prev_length = 0;
     bool rec_complete = false;
@@ -92,24 +108,30 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
     char *data_ptr;
     char *ptr;
 
-    if (filp == NULL || buf == NULL)
-        return retval;
+    // Check for null pointers
+    if (filp == NULL || buf == NULL || f_pos == NULL)
+        return -EINVAL;
 
     PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
 
-    data_ptr = kmalloc(sizeof(char) * count, GFP_KERNEL);
+    // Check for negative file position
+    if (*f_pos < 0)
+        return -EINVAL;
+
+    data_ptr = kmalloc(count, GFP_KERNEL);
     if (data_ptr == NULL) {
         PDEBUG("Memory Allocation Failed\n");
-        return retval;
+        return -ENOMEM;
     }
 
-    unsigned long bytes_not_copied = copy_from_user(data_ptr, buf, count);
-    if (bytes_not_copied != 0) {
+    // Copy data from user space
+    if (copy_from_user(data_ptr, buf, count)) {
         PDEBUG("Data copy failed\n");
         kfree(data_ptr);
-        return retval;
+        return -EFAULT;
     }
 
+    // Search for newline character
     ptr = memchr(data_ptr, '\n', count);
     if (ptr == NULL) {
         pos = count;
@@ -118,39 +140,57 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
         rec_complete = true;
     }
 
+    // Lock mutex
     dev = filp->private_data;
+    if (dev == NULL)
+        return -EINVAL;
+
+    PDEBUG("Locking mutex");
     if (mutex_lock_interruptible(&dev->mutex)) {
         kfree(data_ptr);
+        PDEBUG("Failed to lock mutex");
         return -ERESTARTSYS;
     }
+    PDEBUG("Mutex locked");
 
     prev_length = dev->entry.size;
     dev->entry.size += pos;
-    char *new_data_ptr = (char *)krealloc(dev->entry.buffptr, dev->entry.size, GFP_KERNEL);
+
+    // Reallocate buffer
+    PDEBUG("Reallocation start");
+    char *new_data_ptr = krealloc(dev->entry.buffptr, dev->entry.size, GFP_KERNEL);
     if (new_data_ptr == NULL) {
         PDEBUG("Memory reallocation Failed\n");
         kfree(data_ptr);
         mutex_unlock(&dev->mutex);
-        return retval;
+        PDEBUG("Mutex unlocked due to reallocation failure");
+        return -ENOMEM;
     }
+    PDEBUG("Reallocation complete");
 
-    dev->entry.buffptr = new_data_ptr;
+    dev->entry.buffptr = new_data_ptr; // Update buffptr to point to the new memory location
 
-    // Cast away const qualifier
-    memcpy(dev->entry.buffptr + prev_length, (void *)data_ptr, pos);
+    // Copy data to buffer
+    memcpy(dev->entry.buffptr + prev_length, data_ptr, pos);
 
+    // Add entry to circular buffer if complete record received
     if (rec_complete) {
         const char *ret_ptr = aesd_circular_buffer_add_entry(&dev->buffer, &dev->entry);
         if (ret_ptr != NULL) {
             kfree(ret_ptr);
         }
+        
+        dev->entry.size = 0;
+        dev->entry.buffptr = NULL;
     }
 
+    // Unlock mutex and clean up
+    PDEBUG("Unlocking mutex");
     mutex_unlock(&dev->mutex);
+    PDEBUG("Mutex unlocked");
     kfree(data_ptr);
     return pos;
 }
-
 
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
@@ -209,7 +249,9 @@ void aesd_cleanup_module(void)
 struct aesd_buffer_entry *entry;
 uint8_t index = 0;
 AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.buffer, index){
-kfree(entry->buffptr);
+if(entry->buffptr != NULL){
+	kfree(entry->buffptr);
+}
 }
 
 mutex_destroy(&aesd_device.mutex);
