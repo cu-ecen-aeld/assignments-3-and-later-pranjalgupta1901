@@ -43,7 +43,7 @@ struct thread_data_t
 };
 
 void daemonize(void);
-#ifdef USE_AESD_CHAR_DEVICE
+#if USE_AESD_CHAR_DEVICE
 char filename[] = "/dev/aesdchar";
 #else
 char filename[] = "/var/tmp/aesdsocketdata";
@@ -94,7 +94,6 @@ while (!rec_complete)
     if (memchr(data_ptr, '\n', offset) != NULL)
     {
         rec_complete = true;
-        break;
     }
 }
 
@@ -104,7 +103,7 @@ if (rec_complete)
 #if (USE_AESD_CHAR_DEVICE) 
      fd = open(filename, O_WRONLY | O_APPEND);
 #else    
-      fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+      fd = open(filename, O_CREAT |O_WRONLY | O_APPEND, 0664);
 #endif
     if (fd == -1)
     {
@@ -138,9 +137,10 @@ if (rec_complete)
         return NULL;
     }
 
+    close(fd); // Close the file after writing
     pthread_mutex_unlock(&aesdsocket_mutex);
 
-    close(fd); // Close the file after writing
+   
 
     syslog(LOG_DEBUG, "Sending Started\n");
     int bytes_send;
@@ -148,7 +148,7 @@ if (rec_complete)
 #if (USE_AESD_CHAR_DEVICE) 
     fd = open(filename, O_RDONLY); // Reopen the file for reading
 #else    
- fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);    
+ fd = open(filename, O_RDONLY, 0664);    
 #endif
     if (fd == -1)
     {
@@ -195,7 +195,7 @@ else
 {
     syslog(LOG_PERROR, "Reception is not complete\n");
 }
-
+close(fd);
 close(data->client_fd);
 free(data_ptr);
 
@@ -232,7 +232,7 @@ void timer_handler(int signum)
 	// using strftime to convert time structure to string
 	strftime(MY_TIME, sizeof(MY_TIME), "timestamp: %Y %m %d %H:%M:%S\n", tmp);
 
-	int fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+	int fd = open(filename,  O_WRONLY | O_APPEND, 0664);
 
 	if (fd == -1)
 	{
