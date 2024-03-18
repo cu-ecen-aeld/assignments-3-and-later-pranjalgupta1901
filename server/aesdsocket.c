@@ -101,8 +101,11 @@ while (!rec_complete)
 // Lock the mutex before writing to the file if receive is complete
 if (rec_complete)
 {
+#if (USE_AESD_CHAR_DEVICE) 
      fd = open(filename, O_WRONLY | O_APPEND);
-
+#else    
+      fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);
+#endif
     if (fd == -1)
     {
         syslog(LOG_PERROR, "Error opening or creating the file %s with error code %d\n", filename, errno);
@@ -142,8 +145,11 @@ if (rec_complete)
     syslog(LOG_DEBUG, "Sending Started\n");
     int bytes_send;
     bool send_complete = false;
-
+#if (USE_AESD_CHAR_DEVICE) 
     fd = open(filename, O_RDONLY); // Reopen the file for reading
+#else    
+ fd = open(filename, O_CREAT | O_RDWR | O_APPEND, S_IWUSR | S_IRUSR | S_IWGRP | S_IRGRP | S_IROTH);    
+#endif
     if (fd == -1)
     {
         syslog(LOG_PERROR, "Error opening the file %s for reading with error code %d\n", filename, errno);
@@ -152,6 +158,7 @@ if (rec_complete)
         free(data_ptr);
         return NULL;
     }
+
 	char data_buf[FILE_SIZE];
     while (!send_complete)
     {
