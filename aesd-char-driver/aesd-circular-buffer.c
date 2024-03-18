@@ -69,8 +69,9 @@ int total_operations = 0;
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char* aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
+	const char *ret_ptr = NULL;
     //starting condition
    if(buffer->in_offs == buffer->out_offs && buffer->full == false){
     buffer->in_offs = 0;
@@ -78,15 +79,20 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
     buffer->out_offs = 0; 
     buffer->in_offs++;
    } else{
-   if(buffer->full == true)
-        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-
+   if(buffer->full == true){
+	ret_ptr = buffer->entry[buffer->out_offs].buffptr;
+        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;	
+}
     buffer->entry[buffer->in_offs] = *add_entry;
     buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     if(buffer->in_offs == buffer->out_offs && buffer->full == false)
         buffer->full = true;
    
    }
+
+	return ret_ptr;
+
+
 
 }
 
