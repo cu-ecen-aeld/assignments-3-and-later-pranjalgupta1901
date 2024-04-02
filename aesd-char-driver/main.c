@@ -49,7 +49,11 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                   loff_t *f_pos)
 {
     ssize_t retval = 0;
+    struct aesd_dev *dev = filp->private_data;
+    size_t entry_offset = 0;
+    size_t remaining_bytes = 0;
     PDEBUG("read %zu bytes with offset %lld", count, *f_pos);
+
 
     if (filp == NULL || buf == NULL || f_pos == NULL || *f_pos < 0)
     {
@@ -57,9 +61,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         return retval;
     }
 
-    struct aesd_dev *dev = filp->private_data;
-    size_t entry_offset = 0;
-    size_t remaining_bytes = 0;
+
 
     if (mutex_lock_interruptible(&dev->mutex))
     {
@@ -101,7 +103,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
-    ssize_t retval = 0;
+    //ssize_t retval = 0;
     int pos = 0;
     int prev_length = 0;
     bool rec_complete = false;
@@ -195,14 +197,16 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 
 
 loff_t aesd_llseek(struct file *filp, loff_t offset, int whence) {
-    if (filp == NULL)
-        return -EINVAL;
-
-    struct aesd_dev *dev = NULL;
+ 
+     struct aesd_dev *dev = NULL;
     loff_t f_offset = 0;
     uint8_t index = 0;
     struct aesd_buffer_entry *entry = NULL;
     loff_t total_size = 0;
+
+    if (filp == NULL)
+        return -EINVAL;
+
 
     dev = filp->private_data;
     if (dev == NULL)
@@ -218,7 +222,7 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence) {
     PDEBUG("Mutex locked");
 
     // Calculating the total size of the circular buffer
-    AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev.buffer, index) {
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev->buffer, index) {
         total_size += entry->size;
     }
     mutex_unlock(&dev->mutex);
@@ -282,11 +286,13 @@ static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, u
 
 
 long aesd_ioctl(struct file *filp, unsigned int command, unsigned long arg) {
-    if (filp == NULL)
-        return -EINVAL;
 
     struct aesd_seekto aesd_seekto;
     long ret_val = 0;
+    
+    if (filp == NULL)
+        return -EINVAL;
+
 
     switch (command) {
 
@@ -366,11 +372,13 @@ int aesd_init_module(void)
 
 void aesd_cleanup_module(void)
 {
+struct aesd_buffer_entry *entry;
+uint8_t index = 0;
+
     dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
-struct aesd_buffer_entry *entry;
-uint8_t index = 0;
+
 AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.buffer, index){
 if(entry->buffptr != NULL){
 	kfree(entry->buffptr);
