@@ -20,6 +20,7 @@
 #include <linux/slab.h>
 #include "aesdchar.h"
 #include <linux/uaccess.h>
+#include "aesd_ioctl.h"
 
 //#include <linux/stdbool.h>
 int aesd_major =   0; // use dynamic major
@@ -192,12 +193,134 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
     return pos;
 }
 
+
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence) {
+    if (filp == NULL)
+        return -EINVAL;
+
+    struct aesd_dev *dev = NULL;
+    loff_t f_offset = 0;
+    uint8_t index = 0;
+    struct aesd_buffer_entry *entry = NULL;
+    loff_t total_size = 0;
+
+    dev = filp->private_data;
+    if (dev == NULL)
+        return -EINVAL;
+
+    PDEBUG("Locking mutex");
+    // Lock the mutex 
+    if (mutex_lock_interruptible(&dev->mutex)) {
+        // Failed to acquire mutex
+        PDEBUG("Failed to lock mutex");
+        return -ERESTARTSYS; 
+    }
+    PDEBUG("Mutex locked");
+
+    // Calculating the total size of the circular buffer
+    AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev.buffer, index) {
+        total_size += entry->size;
+    }
+    mutex_unlock(&dev->mutex);
+
+
+    f_offset = fixed_size_llseek(filp, f_offset, whence, total_size);
+
+    return f_offset;
+}
+
+
+static long aesd_adjust_file_offset(struct file *filp, unsigned int write_cmd, unsigned int write_cmd_offset) {
+    if (filp == NULL)
+        return -EINVAL;
+
+    struct aesd_dev *dev = NULL;
+    unsigned int offset = 0;
+    int i;
+
+    dev = filp->private_data;
+    if (dev == NULL)
+        return -EINVAL;
+
+    PDEBUG("Locking mutex");
+    // Lock the mutex 
+    if (mutex_lock_interruptible(&dev->mutex)) {
+        // Failed to acquire mutex
+        PDEBUG("Failed to lock mutex");
+        return -ERESTARTSYS; 
+    }
+    PDEBUG("Mutex locked");
+
+    // Checking if write_cmd is within supported range or not
+    if (write_cmd >= AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
+        PDEBUG("Invalid write command: %d", write_cmd);
+        mutex_unlock(&dev->mutex);
+        return -EINVAL; 
+    }
+    
+    
+    for (i = 0; i < write_cmd; i++) {
+        offset += dev->buffer.entry[i].size;
+    }
+
+    // Checking if write_cmd_offset is within the size of the specified write command or not
+    if (write_cmd_offset >= dev->buffer.entry[write_cmd].size) {
+        PDEBUG("Invalid write command offset: %d", write_cmd_offset);
+        mutex_unlock(&dev->mutex);
+        return -EINVAL; // Invalid write command offset
+    }
+
+   
+    filp->f_pos = offset + write_cmd_offset;
+
+    PDEBUG("File position updated to: %d", filp->f_pos);
+
+    mutex_unlock(&dev->mutex); // Release the mutex
+    return 0; // Success
+}
+
+
+
+long aesd_ioctl(struct file *filp, unsigned int command, unsigned long arg) {
+    if (filp == NULL)
+        return -EINVAL;
+
+    struct aesd_seekto aesd_seekto;
+    long ret_val = 0;
+
+    switch (command) {
+
+    case AESDCHAR_IOCSEEKTO:
+        // Copy parameters from user space
+        if (copy_from_user(&aesd_seekto, (const void __user *)arg, sizeof(aesd_seekto)) != 0) {
+            // Failed to copy data from user space
+            PDEBUG("Data copy failed\n");
+            return -EFAULT;
+        } else {
+            // Adjusting file offset
+            ret_val = aesd_adjust_file_offset(filp, aesd_seekto.write_cmd, aesd_seekto.write_cmd_offset);
+            if (ret_val != 0)
+                return -EFAULT;
+        }
+
+        break;
+    default:
+        // Invalid ioctl command
+        ret_val = -ENOTTY;
+        break;
+    }
+
+    return ret_val;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .llseek = aesd_llseek,
+    .unlocked_ioctl = aesd_ioctl, 
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
