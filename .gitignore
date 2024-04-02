@@ -1,8 +1,14 @@
 *.o
 writer
+aesdsocket
+valgrind-out.txt
 Test_*_Runner.c
 build/
 crosstool-ng
 aesd-build
 .vscode/
 test.sh.log
+aesdsocket
+server/aesdsocket
+server/valgrind-out.txt
+
