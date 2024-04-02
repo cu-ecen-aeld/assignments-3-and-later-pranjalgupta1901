@@ -195,13 +195,12 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
     return pos;
 }
 
-
 loff_t aesd_llseek(struct file *filp, loff_t offset, int whence) {
  
      struct aesd_dev *dev = NULL;
     loff_t f_offset = 0;
     uint8_t index = 0;
-    struct aesd_buffer_entry *entry = NULL;
+    struct aesd_buffer_entry *entry;
     loff_t total_size = 0;
 
     if (filp == NULL)
@@ -228,7 +227,7 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence) {
     mutex_unlock(&dev->mutex);
 
 
-    f_offset = fixed_size_llseek(filp, f_offset, whence, total_size);
+    f_offset = fixed_size_llseek(filp, offset, whence, total_size);
 
     return f_offset;
 }
